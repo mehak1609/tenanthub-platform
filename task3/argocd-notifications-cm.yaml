@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+
+  # Slack connection setup
+  service.slack: |
+    token: $slack-token
+
+  # Slack message template
+
+  template.app-degraded-or-out-of-sync: |
+    message: |
+      :warning: *ArgoCD Alert*
+      *App:* {{.app.metadata.name}}
+      *Environment:* {{.app.metadata.labels.environment}}
+      *Status:* {{.app.status.health.status}}
+      *Sync:* {{.app.status.sync.status}}
+      *Link:* https://argocd.example.com/applications/{{.app.metadata.name}}
+
+  # Trigger — to snd alert
+  trigger.on-degraded: |
+    - when: app.status.health.status == 'Degraded'
+      send: [app-degraded-or-out-of-sync]
+
+  trigger.on-out-of-sync: |
+    - when: app.status.sync.status == 'OutOfSync'
+      send: [app-degraded-or-out-of-sync]
+      
+
+  # Default subscriptions — to apply on all apps
+  subscriptions: |
+    - recipients:
+        - slack:devops-alerts
+      triggers:
+        - on-degraded
+        - on-out-of-sync

@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: acme-corp
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - external-secret.yaml
+  - network-policy.yaml
+
+commonLabels:
+  app: tenanthub
+  tenant: acme-corp
+  managed-by: kustomize

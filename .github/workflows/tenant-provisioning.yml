@@ -1,0 +1,74 @@
+name: Tenant Provisioning
+
+on:
+  push:
+    paths:
+      - 'tenants.yaml'
+    branches:
+      - main
+
+jobs:
+  provision-tenant:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.3
+
+      - name: Parse tenant from tenants.yaml
+        id: parse
+        run: |
+          TENANT_NAME=$(cat tenants.yaml | grep 'name:' | head -1 | awk '{print $3}')
+          DB_NAME=$(cat tenants.yaml | grep 'db_name:' | head -1 | awk '{print $3}')
+          DB_USER=$(cat tenants.yaml | grep 'db_user:' | head -1 | awk '{print $3}')
+          echo "tenant_name=$TENANT_NAME" >> $GITHUB_OUTPUT
+          echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+          echo "db_user=$DB_USER" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init
+        working-directory: task1/terraform
+        run: terraform init
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Terraform Plan
+        working-directory: task1/terraform
+        run: |
+          terraform plan \
+            -var="tenant_name=${{ steps.parse.outputs.tenant_name }}" \
+            -var="db_name=${{ steps.parse.outputs.db_name }}" \
+            -var="db_user=${{ steps.parse.outputs.db_user }}" \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var="cloud_sql_instance=${{ secrets.CLOUD_SQL_INSTANCE }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -out=tfplan
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Terraform Apply
+        working-directory: task1/terraform
+        run: terraform apply -auto-approve tfplan
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Create K8s Namespace and RBAC
+        run: |
+          kubectl apply -f task1/k8s/namespace.yaml
+          kubectl apply -f task1/k8s/rbac.yaml
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "feat: provision tenant ${{ steps.parse.outputs.tenant_name }}"
+          title: "Provision tenant: ${{ steps.parse.outputs.tenant_name }}"
+          body: |
+            ## New Tenant Provisioned
+            - Tenant: ${{ steps.parse.outputs.tenant_name }}
+            - Database: ${{ steps.parse.outputs.db_name }}
+            - User: ${{ steps.parse.outputs.db_user }}
+          branch: "tenant/${{ steps.parse.outputs.tenant_name }}"

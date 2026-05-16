@@ -1,0 +1,4 @@
+tenants:
+  - name: acme-corp
+    db_name: acme_corp_db
+    db_user: acme_corp_user

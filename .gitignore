@@ -1,0 +1,6 @@
+task1/terraform/terraform.tfvars
+task2/terraform/terraform.tfvars
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
