@@ -1,44 +1,41 @@
 # Task 1 — Tenant Provisioning
 
-## Overview
-This task automates the full provisioning flow for onboarding a new tenant (acme-corp) 
-onto the TenantHub SaaS platform.
+## What I Was Trying to Solve
+When a new client (tenant) joins TenantHub, someone has to manually 
+create a database, set up Kubernetes resources, and configure permissions.
+This is slow, error-prone, and doesn't scale. I wanted to make this 
+fully automatic — just add a row to tenants.yaml and everything 
+provisions itself.
 
+## What I Built
 
-## Components
+### Terraform Module
+I wrote a Terraform module that creates a dedicated PostgreSQL database 
+and user for each tenant inside an existing Cloud SQL instance. 
+The resources are idempotent — if the workflow runs twice for the same 
+tenant, Terraform detects that the resources already exist and makes 
+no changes.
 
-### 1. Terraform Module
-- Provisions a dedicated PostgreSQL database and user for the tenant
-- Uses GCP Cloud SQL instance
-- All resources are idempotent — running twice will not create duplicates
+### Kubernetes Manifests
+I created three resources per tenant:
+- **Namespace** — gives the tenant a completely isolated space on the cluster
+- **Role** — grants read-only access to only that tenant's own secret,
+  nothing else
+- **RoleBinding** — connects the Role to the tenant's ServiceAccount
 
-
-### 2. Kubernetes Manifests
-- **Namespace** — dedicated `acme-corp` namespace for isolation
-- **ServiceAccount** — tenant-specific service account
-- **Role** — read-only access scoped only to tenant's own secrets
-- **RoleBinding** — binds the Role to the ServiceAccount
-
-
-### 3. GitHub Actions Workflow
-- Triggered automatically when a new row is added to `tenants.yaml`
-- Runs Terraform to provision the database
-- Creates Kubernetes namespace and RBAC
-- Opens a Pull Request with all changes
-
+### GitHub Actions Workflow
+The workflow triggers automatically when a new row is added to 
+tenants.yaml. It runs Terraform, applies the Kubernetes manifests, 
+and opens a Pull Request with all the changes. It is safe to re-run.
 
 ## Idempotency
-If the workflow is run twice for the same tenant:
-- Terraform uses `resource` blocks which check existing state — 
-  if the database and user already exist, no changes are made
-- `kubectl apply` is declarative — applying the same manifest 
-  twice has no effect
-- The GitHub Actions workflow is safe to re-run at any time
-
+If the workflow runs twice for the same tenant:
+- Terraform checks existing state — no duplicate resources are created
+- kubectl apply is declarative — same manifest applied twice = no change
+- The PR step uses the same branch name, so it updates the existing PR
 
 ## Scaling to 50 Tenants
-To scale to 50 tenants without editing the workflow:
-- Simply add new rows to `tenants.yaml`
-- The workflow loops through all tenants automatically
-- Each tenant gets their own database, namespace, and RBAC
-- No changes needed to the workflow itself
+To onboard 50 tenants, I would loop over all entries in tenants.yaml 
+using a matrix strategy in GitHub Actions. Each tenant gets processed 
+independently. No changes needed to the workflow itself — just add 
+rows to tenants.yaml.

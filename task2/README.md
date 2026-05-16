@@ -1,63 +1,58 @@
 # Task 2 — Secret Isolation & Security
 
-## Overview
-This task fixes a critical security vulnerability where all tenants 
-shared one Kubernetes Secret. Now each tenant has completely isolated 
-secrets with scoped access.
+## What I Was Trying to Solve
+The existing setup had all tenants sharing a single Kubernetes Secret 
+called app-env. This meant any pod could read any tenant's database 
+credentials — a serious security risk in a fintech environment where 
+data isolation is critical.
 
-## Components
+I wanted to ensure each tenant can only ever access their own secrets,
+nothing else.
 
-### 1. GCP Secret Manager (Terraform)
-- Each tenant gets a dedicated secret: `tenant-acme-corp-credentials`
-- Stores DB name, user, and password as JSON
-- No shared secrets between tenants
+## What I Built
 
-### 2. Workload Identity (Terraform)
-- A dedicated GCP Service Account is created per tenant
-- The Kubernetes ServiceAccount is annotated to bind to the GCP SA
-- This allows pods to authenticate to GCP without storing credentials
+### Per-Tenant Secrets in GCP Secret Manager
+Instead of one shared Kubernetes Secret, I created a dedicated secret 
+in GCP Secret Manager for each tenant — for example,
+tenant-acme-corp-credentials. This stores the tenant's DB name, 
+user, and password as a JSON object.
 
-### 3. IAM Binding (Terraform)
-- The GCP Service Account gets `roles/secretmanager.secretAccessor`
-- Scoped ONLY to that tenant's secret — not the whole project
-- Even if one tenant is compromised, others remain safe
+### Workload Identity
+I didn't want to store GCP credentials inside the cluster. Instead,
+I used Workload Identity to bind the Kubernetes ServiceAccount to a 
+GCP Service Account. This way, pods authenticate to GCP automatically 
+without any stored keys.
 
-### 4. ExternalSecret (Kubernetes)
-- External Secrets Operator syncs the GCP secret into the namespace
-- Creates a native Kubernetes Secret `acme-corp-credentials`
-- Refreshes every 1 hour automatically
+### Scoped IAM Binding
+The GCP Service Account gets roles/secretmanager.secretAccessor — but 
+scoped only to that tenant's single secret, not the entire project.
+Even if a tenant's pod is compromised, the attacker can only read that 
+one secret — not every tenant's credentials.
 
-### 5. NetworkPolicy (Kubernetes)
-- Denies ALL egress by default
-- Allows only: cluster DNS (port 53) and own database (port 5432)
-- Tenant pods cannot reach other tenants' databases
+### ExternalSecret
+I used External Secrets Operator to automatically sync the GCP secret 
+into the tenant's Kubernetes namespace as a native Secret. It refreshes 
+every hour so any credential rotation is picked up automatically.
+
+### NetworkPolicy
+I wrote a NetworkPolicy that denies all egress by default, and only 
+allows two things:
+- Cluster DNS (port 53) — so the pod can resolve hostnames
+- Its own database (port 5432) — nothing else
 
 ## Security Analysis
 
-### What attack is prevented by scoping IAM to a single secret?
+### What attack does scoped IAM prevent?
+Without scoping, a compromised pod with access to the GCP Service Account 
+could read every tenant's credentials across the entire project — a 
+complete data breach. By scoping the IAM binding to a single secret, 
+I limit the blast radius. Even in a worst-case compromise, only one 
+tenant's data is at risk.
 
-By binding the IAM role `roles/secretmanager.secretAccessor` to only 
-`tenant-acme-corp-credentials` instead of the entire project, we prevent 
-a **privilege escalation / lateral movement attack**.
-
-If a tenant's pod is compromised and an attacker gains access to the 
-GCP Service Account, they can only read that one tenant's secret. 
-Without scoping, the same compromised account could read ALL tenants' 
-database credentials across the entire project — a complete data breach. 
-Scoped IAM enforces the **principle of least privilege**: every identity 
-gets only the minimum permissions it needs.
-
-### Why is NetworkPolicy alone not sufficient for tenant isolation?
-
-NetworkPolicy controls **network-level traffic** but does not address 
-other isolation concerns in a shared Kubernetes cluster. A malicious 
-or misconfigured pod could still:
-
-- Read another tenant's Kubernetes Secrets if RBAC is not configured
-- Access shared cluster resources like ConfigMaps or ServiceAccounts
-- Consume excessive CPU/memory, starving other tenants (no resource quotas)
-- Exploit Kubernetes API server vulnerabilities
-
-True tenant isolation requires a **defence-in-depth approach**: 
-NetworkPolicy + RBAC + scoped IAM + resource quotas + separate 
-namespaces — all working together.
+### Why is NetworkPolicy alone not enough?
+NetworkPolicy only controls network traffic. It doesn't prevent a 
+misconfigured pod from reading another tenant's Kubernetes Secrets 
+if RBAC isn't set up correctly. It also doesn't prevent resource 
+exhaustion — one tenant could consume all cluster CPU/memory and 
+starve others. Real tenant isolation needs NetworkPolicy + RBAC + 
+scoped IAM + resource quotas working together.

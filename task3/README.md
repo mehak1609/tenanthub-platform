@@ -1,41 +1,38 @@
 # Task 3 — Infra Change Visibility
 
-## Overview
-This task solves two problems:
-1. Team merges PRs without knowing what Kubernetes resources will change
-2. No alerting when deployments break in ArgoCD
+## What I Was Trying to Solve
+The team was merging infrastructure PRs without knowing what Kubernetes 
+resources would actually change. A small YAML edit could accidentally 
+delete a NetworkPolicy or change a Role — and nobody would notice until 
+something broke in production.
 
-## Components
+There was also no alerting when ArgoCD deployments went wrong, so 
+failures were discovered late.
 
-### 1. PR Diff Workflow (GitHub Actions)
-Every PR to the infra repo automatically:
-- Builds Kustomize output for both PR branch and main branch
-- Diffs the two outputs
-- Posts the diff as a PR comment so reviewers can see exactly
-  what Kubernetes resources will change before merging
+## What I Built
 
-### 2. ArgoCD Notifications (Slack Alert)
-- Sends a Slack message to `#devops-alerts` channel whenever
-  any ArgoCD Application goes Degraded or OutOfSync
-- Message includes: app name, environment, status, and ArgoCD UI link
+### PR Diff Workflow
+I wrote a GitHub Actions workflow that runs on every PR to the infra repo.
+It builds the Kustomize output for both the PR branch and main, diffs 
+the two outputs, and posts the result as a comment directly on the PR.
 
-## Real Scenario — How PR Diff Would Catch a Mistake
+This means before anyone merges, they can see exactly which Kubernetes 
+resources will be added, changed, or removed — right in the PR itself.
 
-**Scenario:** A developer accidentally changes the NetworkPolicy
-to allow ALL egress traffic instead of only DNS and the database.
+### ArgoCD Slack Alert
+I configured ArgoCD notifications to send a Slack message to 
+#devops-alerts whenever any Application transitions to Degraded or 
+OutOfSync. The message includes the app name, environment, and a 
+direct link to the ArgoCD UI so the team can investigate immediately.
 
-Without the PR diff workflow, this would be merged and deployed
-silently — opening a serious security hole where tenant pods could
-reach any external service.
+## Real Scenario — How This Would Have Caught a Mistake
+Imagine a developer is updating the NetworkPolicy for acme-corp and 
+accidentally removes the egress restrictions, allowing all outbound 
+traffic. In a normal code review, this is easy to miss — YAML diffs 
+are hard to read.
 
-**With the PR diff workflow:**
-- The diff comment on the PR would clearly show the NetworkPolicy
-  changed from restricted egress to allow-all
-- The reviewer would immediately spot the mistake
-- The PR would be rejected before it ever reaches production
-
-This is exactly the kind of subtle but critical infra mistake that
-is invisible in a normal code review but obvious in a resource diff.
-
-## Kustomize Output
-See `kustomize-output.txt` for the full rendered manifest output.
+With the PR diff workflow, the comment on the PR would clearly show 
+the NetworkPolicy changed from restricted egress to allow-all. The 
+reviewer would spot it immediately and reject the PR before it ever 
+reaches production. This kind of subtle but critical security mistake 
+is exactly what this workflow is designed to catch.
